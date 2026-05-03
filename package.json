@@ -1,0 +1,25 @@
+{
+  "name": "auto-github-bug-reporter",
+  "version": "1.0.0",
+  "description": "Automatically captures runtime errors and reports them as GitHub issues",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "node test/basic.test.js"
+  },
+  "keywords": [
+    "bug-reporter",
+    "error-tracker",
+    "github-issues",
+    "error-reporting",
+    "runtime-errors"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
