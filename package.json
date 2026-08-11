@@ -1,25 +1,54 @@
 {
   "name": "auto-github-bug-reporter",
-  "version": "1.0.0",
-  "description": "Automatically captures runtime errors and reports them as GitHub issues",
+  "version": "2.0.0",
+  "description": "Zero-dependency error reporter that deduplicates runtime errors by fingerprint and files them as GitHub issues",
   "main": "index.js",
+  "module": "index.mjs",
   "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.js",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "index.js",
+    "index.mjs",
+    "index.d.ts",
+    "src/",
+    "README.md"
+  ],
   "scripts": {
-    "test": "node test/basic.test.js"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "bug-reporter",
     "error-tracker",
-    "github-issues",
     "error-reporting",
-    "runtime-errors"
+    "error-monitoring",
+    "github-issues",
+    "runtime-errors",
+    "uncaught-exception",
+    "unhandled-rejection",
+    "crash-reporting",
+    "deduplication",
+    "zero-dependencies"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "node-fetch": "^3.3.2"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Minka1902/bug-reporter.git"
   },
+  "bugs": {
+    "url": "https://github.com/Minka1902/bug-reporter/issues"
+  },
+  "homepage": "https://github.com/Minka1902/bug-reporter#readme",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   }
 }
