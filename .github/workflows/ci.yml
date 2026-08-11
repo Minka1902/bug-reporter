@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The package has no dependencies; `npm ci` keeps the lockfile honest.
+      - run: npm ci
+
+      # The suite mocks fetch end to end — no live GitHub calls.
+      - run: npm test
