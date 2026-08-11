@@ -31,7 +31,15 @@ The README claims the package "detects runtime errors", and that is the feature 
 
 - Rename `init()` → `install(options)`; keep `init` as a deprecated alias for one major version. Keep `detach()` (alias `uninstall()`).
 - Node: `process.on('uncaughtException')` + `process.on('unhandledRejection')` (already implemented in `src/autoCapture.js`; carried over).
-- Browser: `window.onerror` and `window.addEventListener('unhandledrejection', …)` behind environment detection, so the same entry point works in both runtimes.
+- Browser (`window.onerror` / `unhandledrejection`): **deferred to v2.1**. v2.0 stays Node-only to keep scope tight, but `install()` and the transport interface are designed so the browser wiring slots in without API changes (environment detection inside `install()`, no Node-only types in the public surface, disk cache already optional).
+
+### Crash semantics: report, then exit
+
+v1 silently changes Node's crash behavior: its `uncaughtException` handler swallows the crash and keeps a possibly-corrupt process alive. v2 preserves crash semantics by default:
+
+- On `uncaughtException`: run the report pipeline with a hard timeout (default 3s), then `process.exit(1)` — mirroring what Node would have done.
+- `exitOnUncaught: false` opts back into v1's keep-alive behavior for those who really want it.
+- `unhandledRejection` reports never exit (matching Node's default of not crashing on them in current versions).
 
 ### Return a result, don't just log
 
@@ -66,7 +74,7 @@ Free-text searching the error message is fragile. Replace it with a deterministi
 - **Embed it in the issue body** as `<!-- bug-reporter:fp=<hash> -->` and search for that exact string. Deterministic instead of fuzzy.
 - **Search `state:all`**, not just open — otherwise closed bugs get re-filed and regressions are silently swallowed as "duplicate".
 - **Cache fingerprints locally**: in-memory `Map` plus optional disk persistence. GitHub's search API allows 30 req/min authenticated (10 unauthenticated) and is eventually consistent — a crash loop blows through that in seconds, and the second report races the first. The local cache is consulted before any network call.
-- **On duplicate, do something**: post a comment on the existing issue, or bump an occurrence counter in the body ("Seen 143 times since Aug 3"). Far more useful to a maintainer than silence, and it makes `status: 'duplicate'` observable.
+- **On duplicate, do something**: post a throttled "seen again" comment on the matched issue (occurrence count, environment, timestamp — "Seen 143 times since Aug 3"), max one comment per fingerprint per throttle window so a crash loop can't flood the thread. **If the matched issue is closed, reopen it** — a fingerprint match on a closed issue is a regression and should surface loudly, not be filed as a fresh duplicate or swallowed. Far more useful to a maintainer than silence, and it makes `status: 'duplicate'` observable.
 
 ## 3. Safety — before wide adoption
 
@@ -115,9 +123,11 @@ The package is called a bug reporter but is GitHub-only. Introduce a small trans
 
 ```js
 {
-  search(fingerprint) => { url, issueNumber } | null,
+  search(fingerprint) => { url, issueNumber, state } | null,
   create(issue)       => { url, issueNumber },
-  // optional: comment(issueNumber, body) for the duplicate-bump path
+  // optional — used by the duplicate path when present:
+  comment(issueNumber, body),
+  reopen(issueNumber),
 }
 ```
 
@@ -127,14 +137,18 @@ The package is called a bug reporter but is GitHub-only. Introduce a small trans
 ## 6. Hygiene
 
 - **Zero runtime dependencies**: drop `node-fetch`, use native `fetch`, require **Node ≥ 18** (`engines`). "0 deps" is a genuine selling point for something that sits in the error path.
-- **`package.json`**: add `files`, `repository`, `bugs`, `homepage`, `sideEffects: false`; keep/expand `keywords`; bump `engines` to `>=18`.
+- **Dual CJS + ESM packaging**: conditional `exports` map (`require` → CJS, `import` → ESM) so both `require()` and `import` users are served. Source stays CJS; ship a thin hand-written ESM wrapper (`index.mjs` re-exporting the CJS entry) rather than adding a build step — the surface is small enough. Types stay in `index.d.ts`, referenced from the `exports` map.
+- **`package.json`**: add `files`, `repository`, `bugs`, `homepage`, `sideEffects: false`, the `exports` map above; keep/expand `keywords`; bump `engines` to `>=18`.
 - **CI**: GitHub Actions matrix on Node 18 / 20 / 22, with `nock` (or `msw`) mocking the GitHub API — no live calls in tests. Required coverage:
   - fingerprint stability (same bug, different message details → same hash),
   - redaction of each default pattern,
   - per-fingerprint and global throttle,
+  - duplicate path (throttled comment; reopen when the matched issue is closed),
+  - exit-on-uncaught semantics (exits 1 after report, honors `exitOnUncaught: false`, report timeout),
   - offline/network-failure path (must resolve `skipped`, never throw),
   - 403/429 path with `retry-after`,
-  - no-token path (pre-filled new-issue URL).
+  - no-token path (pre-filled new-issue URL),
+  - both entry points load (`require()` and `import` against the `exports` map).
 - **Publish**: npm provenance on tag via CI.
 - **README rewrite** to match the real v2 API: `install()` front and center, result-object usage, safety defaults, fine-grained-PAT instructions, migration notes from v1.
 
@@ -142,9 +156,10 @@ The package is called a bug reporter but is GitHub-only. Introduce a small trans
 
 ```
 index.js                  — public surface: install, uninstall/detach, reportError, formatIssue
+index.mjs                 — thin ESM wrapper re-exporting index.js    (new)
 index.d.ts                — updated types for everything above
 src/reporter.js           — pipeline: fingerprint → redact → throttle → format → transport
-src/autoCapture.js        — install()/detach(), Node + browser handler wiring
+src/autoCapture.js        — install()/detach(), exit-on-uncaught handling (browser wiring lands v2.1)
 src/fingerprint.js        — normalize + hash                          (new)
 src/redact.js             — default patterns, user patterns           (new)
 src/throttle.js           — per-fp throttle, hourly cap, backoff      (new)
@@ -160,6 +175,10 @@ test/                     — mocked-API test suite, run in CI matrix
 | `init(options)` | `install(options)` (`init` deprecated alias) |
 | `silent: boolean` | `logLevel` / `logger` (`silent` deprecated alias) |
 | statuses `existing` / `not_reported` / `error` | `duplicate` / `unreported` / `skipped` |
-| fuzzy message search, open issues | fingerprint search, `state:all` |
+| fuzzy message search, open issues | fingerprint search, `state:all`, comment + reopen on match |
+| swallows `uncaughtException`, app stays alive | report then `process.exit(1)` (`exitOnUncaught: false` to opt out) |
 | `node-fetch`, Node ≥ 14 | native `fetch`, Node ≥ 18, zero deps |
+| CJS only | dual CJS + ESM via `exports` map |
 | full `repo`-scope token in docs | fine-grained PAT, Issues only |
+
+Deliberately out of scope for v2.0: browser support (`window.onerror` / `unhandledrejection`) — planned for v2.1 on top of the same `install()` and transport surface.
